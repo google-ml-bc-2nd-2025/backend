@@ -11,7 +11,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # 설치된 버전 확인
-RUN python --version
+RUN python3 --version
 RUN pip --version
 
 
