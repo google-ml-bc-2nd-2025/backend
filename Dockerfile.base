@@ -8,11 +8,23 @@ ENV TZ=Asia/Seoul
 RUN apt update && apt install -y curl gnupg \
  && curl -fsSL https://ollama.com/download/ollama-install.sh | sh
 
-# Python 3.12 설치
-RUN apt update && apt install -y software-properties-common && \
+# Python 3.12 설치 위한 PPA 등록
+RUN apt-get update && apt-get install -y \
+    software-properties-common && \
     add-apt-repository ppa:deadsnakes/ppa -y && \
-    apt update && apt install -y python3.12 python3.12-venv python3.12-dev python3-pip && \
-    update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1
+    apt-get update && apt-get install -y \
+    python3.12 \
+    python3.12-dev \
+    python3.12-venv \
+    python3-pip \
+    python3-setuptools \
+    wget \
+    build-essential \
+    ca-certificates \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# 기본 Python 버전으로 3.12 설정
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1
 
 RUN python3 --version  # 확인
 
