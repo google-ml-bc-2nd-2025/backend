@@ -1,28 +1,27 @@
-FROM ollama/ollama:latest
+FROM bc_backend:1.0
 
+# 비대화형 설치 환경 설정
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=Asia/Seoul
 
 # 작업 디렉토리 설정
 WORKDIR /app
 
-# 필요한 시스템 패키지 설치
+# 필요한 시스템 패키지 설치 (멀티 스테이지로 한번에 설치)
 RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
+    && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# 설치된 버전 확인
-RUN python3 --version
-RUN pip --version
-
-
-# Python 패키지 설치
+# Python 패키지 설치 (requirements.txt를 별도로 복사해서 캐시 활용)
 COPY requirements.txt .
 RUN pip3 install --no-cache-dir -r requirements.txt
 
-# 애플리케이션 코드 복사
+# 애플리케이션 코드 복사 (자주 변경되는 부분을 마지막에 배치)
 COPY . .
 
-# Ollama 서비스 시작 및 모델 다운로드를 위한 스크립트
+# Ollama 서비스 시작 스크립트 설정
 COPY start.sh /start.sh
 RUN chmod +x /start.sh
 
