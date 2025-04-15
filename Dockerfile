@@ -31,11 +31,10 @@ RUN pip3 install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Ollama 서비스 시작 스크립트 설정
-COPY start.sh /start.sh
-RUN chmod +x /start.sh
+RUN chmod +x start.sh
 
 # 포트 노출 (서버 포트 , 2188)
 EXPOSE 2188 2188
 
 # 시작 스크립트 실행
-ENTRYPOINT ["/start.sh"]
+CMD ["./start.sh"]
