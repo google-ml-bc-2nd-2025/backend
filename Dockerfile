@@ -10,6 +10,7 @@ WORKDIR /app
 # 필요한 시스템 패키지 설치 (멀티 스테이지로 한번에 설치)
 RUN apt-get update && apt-get install -y \
     curl \
+    dos2unix \    
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -30,6 +31,7 @@ RUN pip3 install --no-cache-dir -r requirements.txt
 # 애플리케이션 코드 복사 (자주 변경되는 부분을 마지막에 배치)
 COPY . .
 
+RUN dos2unix start.sh
 # Ollama 서비스 시작 스크립트 설정
 RUN chmod +x start.sh
 
