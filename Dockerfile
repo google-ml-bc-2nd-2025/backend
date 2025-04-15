@@ -13,6 +13,16 @@ RUN apt-get update && apt-get install -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
+# 구 pip 삭제 후 재설치
+# system pip 제거 (중요!)
+RUN apt-get remove -y python3-pip || true
+
+# 최신 pip 직접 설치 (pip, setuptools, wheel 포함)
+RUN curl -sS https://bootstrap.pypa.io/get-pip.py | python3
+
+# 확인
+RUN which pip3 && pip3 --version && python3 --version
+
 # Python 패키지 설치 (requirements.txt를 별도로 복사해서 캐시 활용)
 COPY requirements.txt .
 RUN pip3 install --no-cache-dir -r requirements.txt
