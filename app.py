@@ -33,9 +33,7 @@ def generate_text(request: PromptRequest):
     """
     try:
         result = ollama_client.generate_with_gemma3(
-            prompt=request.prompt, 
-            model=request.model,
-            stream=request.stream
+            prompt=request.prompt
         )
         
         if "error" in result:
