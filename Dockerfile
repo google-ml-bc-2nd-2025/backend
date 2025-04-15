@@ -34,8 +34,8 @@ COPY . .
 COPY start.sh /start.sh
 RUN chmod +x /start.sh
 
-# 포트 노출 (Ollama API + 애플리케이션 포트)
-EXPOSE 11434 8000
+# 포트 노출 (서버 포트 , 2188)
+EXPOSE 2188 2188
 
 # 시작 스크립트 실행
 ENTRYPOINT ["/start.sh"]
