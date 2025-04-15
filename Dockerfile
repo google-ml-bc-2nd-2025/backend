@@ -1,4 +1,4 @@
-FROM bc_backend:1.2
+FROM bc_backend:1.3
 
 # 비대화형 설치 환경 설정
 ENV DEBIAN_FRONTEND=noninteractive

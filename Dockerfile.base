@@ -8,8 +8,8 @@ RUN apt update && apt install -y curl gnupg
 
 # ollama 수동 설치. 공식 패키지는 os 예전 , py3.10 버전이라... langgraph 사용 불가
 # Download and install Ollama
-RUN curl -L https://ollama.com/download/ollama-linux-amd64 -o /usr/local/bin/ollama \
-&& chmod +x /usr/local/bin/ollama
+RUN curl -L https://ollama.com/download/ollama-linux-amd64.tgz -o ollama-linux-amd64.tgz \
+&& tar -xzf ollama-linux-amd64.tgz && cp ./bin/ollama /usr/local/bin/ && chmod +x /usr/local/bin/ollama
 
 
 # Python 3.12 설치 위한 PPA 등록
