@@ -3,18 +3,10 @@ import uvicorn
 from pydantic import BaseModel
 from typing import Optional
 import agent_manager
-from dotenv import load_dotenv
-import os
-
-# .env 파일 로드
-load_dotenv()
-
-# 환경 변수에서 MODEL 값 가져오기
-DEFAULT_MODEL = os.getenv("MODEL", "gemma3:4b")
-# 기본 서비스 설정 (ollama 또는 google)
-DEFAULT_SERVICE = os.getenv("DEFAULT_SERVICE", "ollama")
-# Google 모델 설정
-GOOGLE_MODEL = os.getenv("GOOGLE_MODEL", "gemini-2.0-flash-lite")
+from agent.conf.config import (
+    DEFAULT_MODEL, DEFAULT_SERVICE, GOOGLE_MODEL, GOOGLE_API_KEY,
+    print_environment_info
+)
 
 app = FastAPI(title="ML Bootcamp API", version="0.1.0")
 
@@ -58,11 +50,17 @@ def generate_text(request: PromptRequest):
         if "error" in result:
             raise HTTPException(status_code=500, detail=result["error"])
         
-        return {
+        response_data = {
             "result": result.get("response", ""), 
             "model": model,
             "service": service
         }
+        
+        # 작업 ID가 있으면 응답에 포함
+        if "task_id" in result:
+            response_data["task_id"] = result["task_id"]
+            
+        return response_data
     except Exception as e:
         print(f"Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -72,7 +70,7 @@ def get_config():
     """
     현재 API 구성 정보 반환
     """
-    google_available = bool(os.getenv("GOOGLE_API_KEY"))
+    google_available = bool(GOOGLE_API_KEY)
     
     return {
         "default_service": DEFAULT_SERVICE,
@@ -87,6 +85,11 @@ def get_config():
             }
         }
     }
+
+# 서버 시작 시 환경 정보 출력
+@app.on_event("startup")
+async def startup_event():
+    print_environment_info()
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=2188)

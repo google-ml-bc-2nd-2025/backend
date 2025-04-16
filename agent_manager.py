@@ -2,24 +2,92 @@
 Ollama 및 Google AI 클라이언트와 LangGraph 에이전트 통합 모듈
 """
 
-import os
-from dotenv import load_dotenv
-from agent import answer_with_agent, streaming_agent_execution, DEFAULT_MODEL
+import uuid
+import datetime
 import google.generativeai as genai
+from agent import answer_with_agent, streaming_agent_execution
+from agent.conf.config import (
+    DEFAULT_MODEL, DEFAULT_SERVICE, GOOGLE_MODEL, GOOGLE_API_KEY,
+    get_redis_client, print_environment_info
+)
 
-# .env 파일 로드
-load_dotenv()
-
-# Google API 키 로드
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-# 기본 서비스 설정 (ollama 또는 google)
-DEFAULT_SERVICE = os.getenv("DEFAULT_SERVICE", "ollama")
-# Google 모델 설정
-GOOGLE_MODEL = os.getenv("GOOGLE_MODEL", "gemini-1.5-pro")
+# Redis 클라이언트 가져오기
+redis_client = get_redis_client()
 
 # Google AI 초기화 (API 키가 있는 경우)
 if GOOGLE_API_KEY:
     genai.configure(api_key=GOOGLE_API_KEY)
+
+def log_request_to_redis(task_id, service, model, prompt):
+    """
+    Redis에 요청 기록 저장
+    
+    Args:
+        task_id (str): 작업 식별자 (UUID)
+        service (str): 사용된 서비스 (ollama 또는 google)
+        model (str): 사용된 모델 이름
+        prompt (str): 요청된 프롬프트
+    """
+    if redis_client is None:
+        return
+    
+    try:
+        timestamp = datetime.datetime.now().isoformat()
+        log_data = {
+            "task_id": task_id,
+            "timestamp": timestamp,
+            "service": service,
+            "model": model,
+            "prompt": prompt,
+            "status": "requested"
+        }
+        
+        # Redis에 로그 저장 (JSON 형식)
+        redis_client.hset(f"task:{task_id}", mapping=log_data)
+        
+        # 로그 메시지 저장
+        log_message = f"{timestamp}: [{task_id}] {model}에 '{prompt}' 요청"
+        redis_client.lpush("request_logs", log_message)
+        redis_client.ltrim("request_logs", 0, 999)  # 최대 1000개 로그 유지
+        
+        print(f"Redis에 작업 기록 저장: {task_id}")
+    except Exception as e:
+        print(f"Redis 로깅 실패: {str(e)}")
+
+def update_task_status(task_id, status, response=None):
+    """
+    Redis에 작업 상태 업데이트
+    
+    Args:
+        task_id (str): 작업 식별자 (UUID)
+        status (str): 작업 상태 (completed, failed)
+        response (str, optional): 응답 결과
+    """
+    if redis_client is None:
+        return
+    
+    try:
+        # 기존 데이터 가져오기
+        task_data = redis_client.hgetall(f"task:{task_id}")
+        if not task_data:
+            return
+        
+        # 상태 업데이트
+        task_data["status"] = status
+        task_data["completed_at"] = datetime.datetime.now().isoformat()
+        
+        if response:
+            task_data["response"] = response[:1000]  # 응답이 너무 길면 자르기
+        
+        # Redis 업데이트
+        redis_client.hset(f"task:{task_id}", mapping=task_data)
+        
+        # 완료 로그 추가
+        log_message = f"{task_data['completed_at']}: [{task_id}] {status}"
+        redis_client.lpush("request_logs", log_message)
+        redis_client.ltrim("request_logs", 0, 999)
+    except Exception as e:
+        print(f"Redis 상태 업데이트 실패: {str(e)}")
 
 def generate_with_gemma3(prompt, model=DEFAULT_MODEL, stream=False, service=DEFAULT_SERVICE):
     """
@@ -34,13 +102,32 @@ def generate_with_gemma3(prompt, model=DEFAULT_MODEL, stream=False, service=DEFA
     Returns:
         dict: 모델의 응답 결과
     """
+    # UUID 생성
+    task_id = str(uuid.uuid4())
+    
+    # Redis에 요청 기록 저장
+    log_request_to_redis(task_id, service, model, prompt)
+    
     try:
         if service.lower() == "google":
-            return generate_with_google_ai(prompt, model, stream)
+            result = generate_with_google_ai(prompt, model, stream)
         else:  # 기본값은 ollama
-            return generate_with_ollama(prompt, model, stream)
+            result = generate_with_ollama(prompt, model, stream)
+        
+        # 성공 상태 업데이트
+        if "response" in result:
+            update_task_status(task_id, "completed", result["response"])
+        else:
+            update_task_status(task_id, "failed", result.get("error", "알 수 없는 오류"))
+        
+        # 결과에 task_id 추가
+        result["task_id"] = task_id
+        return result
     except Exception as e:
-        return {"error": f"생성 중 오류 발생: {str(e)}"}
+        error_msg = f"생성 중 오류 발생: {str(e)}"
+        # 실패 상태 업데이트
+        update_task_status(task_id, "failed", error_msg)
+        return {"error": error_msg, "task_id": task_id}
 
 def generate_with_ollama(prompt, model=DEFAULT_MODEL, stream=False):
     """
@@ -118,9 +205,8 @@ def generate_with_google_ai(prompt, model=GOOGLE_MODEL, stream=False):
 if __name__ == "__main__":
     print("=== AI 서비스와 LangGraph 에이전트 사용하기 ===\n")
     
-    # 사용할 서비스 (ollama 또는 google)
-    service = os.getenv("DEFAULT_SERVICE", "ollama")
-    print(f"사용 중인 서비스: {service.upper()}")
+    # 환경 설정 정보 출력
+    print_environment_info()
     
     # 1. 기본 에이전트 답변 (Ollama)
     question1 = "3D 캐릭터 모델을 만들어줘"
