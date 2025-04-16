@@ -1,4 +1,4 @@
-FROM 3.12-slim⁠
+FROM python:3.12
 
 # 비대화형 설치 환경 설정
 ENV DEBIAN_FRONTEND=noninteractive
