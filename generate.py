@@ -1,14 +1,15 @@
 """
-LangGraph 기반 텍스트 생성 API 라우터
+비동기 텍스트 생성 API 라우터 (Celery 통합)
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 import logging
 import os
 from dotenv import load_dotenv
 import google.generativeai as genai
+from tasks import generate_text_async, process_batch_prompts
 
 # 환경 변수 로드
 load_dotenv()
@@ -23,7 +24,7 @@ genai.configure(api_key=GOOGLE_API_KEY)
 
 # 기본 설정
 DEFAULT_MODEL = os.getenv("GOOGLE_MODEL", "gemini-1.5-pro")
-DEFAULT_SERVICE = "google"  # 기본 서비스를 google로 설정
+DEFAULT_SERVICE = "google"
 
 # 라우터 설정
 router = APIRouter(prefix="/api", tags=["generate"])
@@ -36,27 +37,79 @@ class PromptRequest(BaseModel):
     stream: Optional[bool] = False
     service: Optional[str] = DEFAULT_SERVICE
 
-# 생성 API
+class BatchPromptRequest(BaseModel):
+    prompts: List[str]
+    model: Optional[str] = DEFAULT_MODEL
+    service: Optional[str] = DEFAULT_SERVICE
+
+# 단일 생성 API (비동기)
 @router.post("/generate")
 async def generate_text(request: PromptRequest):
     """
-    Google AI를 통해 텍스트 생성
+    비동기적으로 텍스트 생성
     """
     try:
         logger.info(f"[POST /api/generate] 질문 수신: {request.prompt}")
         
-        # Google AI 모델 설정
-        model = genai.GenerativeModel(request.model)
-        
-        # 텍스트 생성
-        response = model.generate_content(request.prompt)
+        # Celery 작업 시작
+        task = generate_text_async.delay(
+            prompt=request.prompt,
+            model=request.model,
+            stream=request.stream,
+            service=request.service
+        )
         
         return {
-            "result": response.text,
-            "model": request.model,
-            "service": request.service
+            "task_id": task.id,
+            "status": "processing"
         }
 
     except Exception as e:
-        logger.error(f"[Google AI] 생성 실패: {e}", exc_info=True)
+        logger.error(f"[Celery] 생성 실패: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+# 작업 상태 확인 API
+@router.get("/tasks/{task_id}")
+async def get_task_status(task_id: str):
+    """
+    Celery 작업 상태 확인
+    """
+    try:
+        task = generate_text_async.AsyncResult(task_id)
+        if task.ready():
+            return {
+                "status": "completed",
+                "result": task.get()
+            }
+        return {
+            "status": "processing"
+        }
+    except Exception as e:
+        logger.error(f"[Celery] 상태 확인 실패: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+# 배치 처리 API
+@router.post("/generate/batch")
+async def generate_batch(request: BatchPromptRequest):
+    """
+    여러 프롬프트를 배치로 처리
+    """
+    try:
+        logger.info(f"[POST /api/generate/batch] 배치 요청 수신: {len(request.prompts)} 개")
+        
+        # Celery 배치 작업 시작
+        task = process_batch_prompts.delay(
+            prompts=request.prompts,
+            model=request.model,
+            service=request.service
+        )
+        
+        return {
+            "task_id": task.id,
+            "status": "processing",
+            "total_prompts": len(request.prompts)
+        }
+
+    except Exception as e:
+        logger.error(f"[Celery] 배치 처리 실패: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))

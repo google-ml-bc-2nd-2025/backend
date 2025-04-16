@@ -35,7 +35,7 @@ set -e
 # START API Server
 if [ -f "main.py" ]; then
     echo "API Server is starting..."
-    exec python3 main.py
+    python3 main.py
 else
     echo "Error: main.py not found!"
     exit 1
