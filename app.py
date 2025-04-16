@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException, Body
 import uvicorn
 from pydantic import BaseModel
 from typing import Optional
-import ollama_client
+import agent_manager
 from dotenv import load_dotenv
 import os
 
@@ -14,7 +14,7 @@ DEFAULT_MODEL = os.getenv("MODEL", "gemma3:4b")
 # 기본 서비스 설정 (ollama 또는 google)
 DEFAULT_SERVICE = os.getenv("DEFAULT_SERVICE", "ollama")
 # Google 모델 설정
-GOOGLE_MODEL = os.getenv("GOOGLE_MODEL", "gemini-1.5-pro")
+GOOGLE_MODEL = os.getenv("GOOGLE_MODEL", "gemini-2.0-flash-lite")
 
 app = FastAPI(title="ML Bootcamp API", version="0.1.0")
 
@@ -48,7 +48,7 @@ def generate_text(request: PromptRequest):
         
         print(f"사용할 서비스: {service}, 모델: {model}")
         
-        result = ollama_client.generate_with_gemma3(
+        result = agent_manager.generate_with_gemma3(
             prompt=request.prompt,
             model=model,
             stream=request.stream,
