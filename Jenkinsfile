@@ -18,7 +18,7 @@ pipeline {
         
         stage('Build Docker Image') {
             steps {
-                dir('backend/backend') {
+                dir('backend') {
                     script {
                         bat 'docker build -t %DOCKER_IMAGE%:%DOCKER_TAG% .'
                     }
@@ -28,7 +28,7 @@ pipeline {
         
         stage('Test') {
             steps {
-                dir('backend/backend') {
+                dir('backend') {
                     bat 'pip install -r requirements.txt'
                     bat 'python -m pytest tests/ || exit 0'
                 }
