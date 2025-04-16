@@ -10,6 +10,7 @@ import os
 from dotenv import load_dotenv
 import google.generativeai as genai
 from tasks import generate_text_async, process_batch_prompts
+from mdm import generate_animation  # MDM 모델 import
 
 # 환경 변수 로드
 load_dotenv()
@@ -77,10 +78,26 @@ async def get_task_status(task_id: str):
     try:
         task = generate_text_async.AsyncResult(task_id)
         if task.ready():
-            return {
-                "status": "completed",
-                "result": task.get()
-            }
+            result = task.get()
+            
+            if result.get("status") == "completed":
+                return {
+                    "status": "completed",
+                    "text_result": result["text_result"],
+                    "animation_result": result["animation_result"]
+                }
+            elif result.get("status") == "text_only":
+                return {
+                    "status": "text_only",
+                    "text_result": result["text_result"],
+                    "animation_error": result["animation_error"]
+                }
+            else:
+                return {
+                    "status": "failed",
+                    "error": result.get("error", "Unknown error occurred")
+                }
+                
         return {
             "status": "processing"
         }
