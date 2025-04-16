@@ -20,7 +20,7 @@ pipeline {
             steps {
                 dir('backend/backend') {
                     script {
-                        docker.build("${DOCKER_IMAGE}:${DOCKER_TAG}")
+                        bat 'docker build -t %DOCKER_IMAGE%:%DOCKER_TAG% .'
                     }
                 }
             }
@@ -29,8 +29,8 @@ pipeline {
         stage('Test') {
             steps {
                 dir('backend/backend') {
-                    sh 'pip install -r requirements.txt'
-                    sh 'python -m pytest tests/ || true'
+                    bat 'pip install -r requirements.txt'
+                    bat 'python -m pytest tests/ || exit 0'
                 }
             }
         }
@@ -39,18 +39,18 @@ pipeline {
             steps {
                 script {
                     // 기존 컨테이너 중지 및 제거
-                    sh 'docker stop backend-container || true'
-                    sh 'docker rm backend-container || true'
+                    bat 'docker stop backend-container || exit 0'
+                    bat 'docker rm backend-container || exit 0'
                     
                     // 새 컨테이너 실행
-                    sh """
-                        docker run -d \
-                        -p 8000:8000 \
-                        --name backend-container \
-                        --env GOOGLE_API_KEY=${GOOGLE_API_KEY} \
-                        --env GOOGLE_MODEL=gemini-1.5-pro \
-                        --env DEFAULT_SERVICE=google \
-                        ${DOCKER_IMAGE}:${DOCKER_TAG}
+                    bat """
+                        docker run -d ^
+                        -p 8000:8000 ^
+                        --name backend-container ^
+                        --env GOOGLE_API_KEY=%GOOGLE_API_KEY% ^
+                        --env GOOGLE_MODEL=gemini-1.5-pro ^
+                        --env DEFAULT_SERVICE=google ^
+                        %DOCKER_IMAGE%:%DOCKER_TAG%
                     """
                 }
             }
