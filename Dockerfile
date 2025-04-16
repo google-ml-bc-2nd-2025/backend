@@ -4,6 +4,11 @@ FROM python:3.12
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Asia/Seoul
 
+# Google API 환경 변수 설정
+ENV GOOGLE_API_KEY=AIzaSyD-7LK_rHQMea6G3RY9WKtNOeIiUbJ2u2E
+ENV GOOGLE_MODEL=gemini-1.5-pro
+ENV DEFAULT_SERVICE=google
+
 # 작업 디렉토리 설정
 WORKDIR /app
 
@@ -35,8 +40,8 @@ RUN dos2unix start.sh
 # Ollama 서비스 시작 스크립트 설정
 RUN chmod +x start.sh
 
-# 포트 노출 (서버 포트 , 2188)
-EXPOSE 2188 2188
+# 포트 노출 (서버 포트 8000)
+EXPOSE 8000
 
 # 시작 스크립트 실행
 CMD ["./start.sh"]

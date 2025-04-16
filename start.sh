@@ -33,13 +33,10 @@ set -e
 # fi
 
 # START API Server
-if [ -f "app.py" ]; then
+if [ -f "main.py" ]; then
     echo "API Server is starting..."
-    exec python3 app.py
+    exec python3 main.py
 else
-    # Waiting for Ollama service to be ready
-    echo "Only Ollama service is running. Press Ctrl+C to stop."
-    
-    # Quit if Ollama service is not running
-    wait $OLLAMA_PID
+    echo "Error: main.py not found!"
+    exit 1
 fi
