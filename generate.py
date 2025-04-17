@@ -1,16 +1,15 @@
 """
-비동기 텍스트 생성 API 라우터 (Celery 통합)
+텍스트 생성 및 정제를 위한 Google API 연동 모듈
 """
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 import logging
 import os
 from dotenv import load_dotenv
 import google.generativeai as genai
-from tasks import generate_text_async, process_batch_prompts
-from mdm import generate_animation  # MDM 모델 import
+from mdm import generate_animation
 
 # 환경 변수 로드
 load_dotenv()
@@ -23,110 +22,83 @@ if not GOOGLE_API_KEY:
 # Google AI 초기화
 genai.configure(api_key=GOOGLE_API_KEY)
 
-# 기본 설정
-DEFAULT_MODEL = os.getenv("GOOGLE_MODEL", "gemini-1.5-pro")
-DEFAULT_SERVICE = "google"
-
 # 라우터 설정
 router = APIRouter(prefix="/api", tags=["generate"])
 logger = logging.getLogger(__name__)
 
-# 요청 모델
-class PromptRequest(BaseModel):
-    prompt: str
-    model: Optional[str] = DEFAULT_MODEL
-    stream: Optional[bool] = False
-    service: Optional[str] = DEFAULT_SERVICE
-
-class BatchPromptRequest(BaseModel):
-    prompts: List[str]
-    model: Optional[str] = DEFAULT_MODEL
-    service: Optional[str] = DEFAULT_SERVICE
-
-# 단일 생성 API (비동기)
-@router.post("/generate")
-async def generate_text(request: PromptRequest):
+def refine_prompt(prompt: str) -> Dict[str, Any]:
     """
-    비동기적으로 텍스트 생성
-    """
-    try:
-        logger.info(f"[POST /api/generate] 질문 수신: {request.prompt}")
-        
-        # Celery 작업 시작
-        task = generate_text_async.delay(
-            prompt=request.prompt,
-            model=request.model,
-            stream=request.stream,
-            service=request.service
-        )
-        
-        return {
-            "task_id": task.id,
-            "status": "processing"
+    사용자 프롬프트를 모션 생성에 적합한 형태로 정제
+
+    Args:
+        prompt (str): 사용자 입력 프롬프트
+
+    Returns:
+        Dict[str, Any]: {
+            'status': 'success' | 'error',
+            'refined_text': str,  # 정제된 프롬프트
+            'error': str,  # 에러 발생 시 에러 메시지
         }
-
-    except Exception as e:
-        logger.error(f"[Celery] 생성 실패: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
-
-# 작업 상태 확인 API
-@router.get("/tasks/{task_id}")
-async def get_task_status(task_id: str):
-    """
-    Celery 작업 상태 확인
     """
     try:
-        task = generate_text_async.AsyncResult(task_id)
-        if task.ready():
-            result = task.get()
+        # Gemini 모델 설정
+        model = genai.GenerativeModel('gemini-1.5-pro')
+        
+        # 프롬프트 템플릿
+        system_prompt = """
+        당신은 텍스트를 3D 모션 생성에 적합한 형태로 변환하는 전문가입니다.
+        입력된 텍스트를 다음 기준에 맞춰 정제해주세요:
+
+        1. 동작의 속도, 강도, 감정을 명확하게 표현
+        2. 신체의 각 부위(팔, 다리, 몸통 등)의 움직임을 구체적으로 기술
+        3. 동작의 시작과 끝을 명확하게 정의
+        4. 불필요한 수식어나 모호한 표현 제거
+
+        출력 형식:
+        - 한 문장으로 된 명확한 동작 설명
+        - 영어로 변환
+        """
+        
+        # 프롬프트 전송
+        response = model.generate_content([
+            system_prompt,
+            f"입력 텍스트: {prompt}\n변환된 텍스트:"
+        ])
+        
+        # 응답 처리
+        if response.text:
+            return {
+                'status': 'success',
+                'refined_text': response.text.strip()
+            }
+        else:
+            raise ValueError("API 응답이 비어있습니다.")
             
-            if result.get("status") == "completed":
-                return {
-                    "status": "completed",
-                    "text_result": result["text_result"],
-                    "animation_result": result["animation_result"]
-                }
-            elif result.get("status") == "text_only":
-                return {
-                    "status": "text_only",
-                    "text_result": result["text_result"],
-                    "animation_error": result["animation_error"]
-                }
-            else:
-                return {
-                    "status": "failed",
-                    "error": result.get("error", "Unknown error occurred")
-                }
-                
-        return {
-            "status": "processing"
-        }
     except Exception as e:
-        logger.error(f"[Celery] 상태 확인 실패: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
-
-# 배치 처리 API
-@router.post("/generate/batch")
-async def generate_batch(request: BatchPromptRequest):
-    """
-    여러 프롬프트를 배치로 처리
-    """
-    try:
-        logger.info(f"[POST /api/generate/batch] 배치 요청 수신: {len(request.prompts)} 개")
-        
-        # Celery 배치 작업 시작
-        task = process_batch_prompts.delay(
-            prompts=request.prompts,
-            model=request.model,
-            service=request.service
-        )
-        
+        logger.error(f"프롬프트 정제 중 오류 발생: {str(e)}")
         return {
-            "task_id": task.id,
-            "status": "processing",
-            "total_prompts": len(request.prompts)
+            'status': 'error',
+            'error': str(e)
         }
 
-    except Exception as e:
-        logger.error(f"[Celery] 배치 처리 실패: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+def generate_with_retry(prompt: str, max_retries: int = 3) -> Dict[str, Any]:
+    """
+    재시도 로직이 포함된 텍스트 생성 함수
+
+    Args:
+        prompt (str): 사용자 입력 프롬프트
+        max_retries (int): 최대 재시도 횟수
+
+    Returns:
+        Dict[str, Any]: 정제된 텍스트 또는 에러 정보
+    """
+    for attempt in range(max_retries):
+        result = refine_prompt(prompt)
+        if result['status'] == 'success':
+            return result
+        logger.warning(f"프롬프트 정제 재시도 {attempt + 1}/{max_retries}")
+    
+    return {
+        'status': 'error',
+        'error': f"최대 재시도 횟수({max_retries})를 초과했습니다."
+    }
