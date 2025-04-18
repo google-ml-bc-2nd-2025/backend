@@ -18,6 +18,7 @@ load_dotenv()
 # 기본 설정
 DEFAULT_MODEL = os.getenv("GOOGLE_MODEL", "gemini-1.5-pro")
 DEFAULT_SERVICE = "google"
+AI_MODEL_SERVER_URL = os.getenv("AI_MODEL_SERVER_URL", "http://localhost:8002")
 
 # FastAPI 앱 생성
 app = FastAPI(title="Motion Generation API")

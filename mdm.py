@@ -5,13 +5,28 @@ Motion Diffusion Model (MDM) 인터페이스
 
 import logging
 import time
+import requests
+import os
+import uuid
+import json
+import base64
+import numpy as np
 from typing import Dict, Any, Optional, Union, List
 from dataclasses import dataclass
 from enum import Enum
-import numpy as np
-import json
+import redis
 
 logger = logging.getLogger(__name__)
+
+# AI 모델 서버 URL
+AI_MODEL_SERVER_URL = os.getenv("AI_MODEL_SERVER_URL", "http://localhost:8002")
+
+# Redis 연결
+redis_client = redis.Redis(
+    host=os.getenv("REDIS_HOST", "localhost"),
+    port=int(os.getenv("REDIS_PORT", 6379)),
+    db=int(os.getenv("REDIS_DB", 0))
+)
 
 class MotionGenerationError(Exception):
     """모션 생성 중 발생하는 에러를 처리하기 위한 커스텀 예외"""
@@ -36,6 +51,7 @@ class MotionMetadata:
     frame_count: int
     fps: float = 30.0
     additional_info: Dict[str, Any] = None
+    data_key: Optional[str] = None  # Redis에 저장된 데이터의 키
 
     def to_dict(self) -> Dict[str, Any]:
         """메타데이터를 딕셔너리로 변환"""
@@ -45,6 +61,7 @@ class MotionMetadata:
             "generation_time": self.generation_time,
             "frame_count": self.frame_count,
             "fps": self.fps,
+            "data_key": self.data_key,
             **(self.additional_info or {})
         }
 
@@ -81,6 +98,74 @@ class MotionGenerator:
         self.status = MotionStatus.INITIALIZING
         logger.info(f"MotionGenerator 초기화 (버전: {model_version})")
     
+    def save_motion_data(self, motion_data: Union[np.ndarray, bytes], prompt: str) -> str:
+        """모션 데이터를 Redis에 저장하고 키를 반환"""
+        try:
+            # 고유 키 생성
+            data_key = f"motion:{uuid.uuid4()}"
+            
+            # NumPy 배열인 경우
+            if isinstance(motion_data, np.ndarray):
+                # NumPy 배열을 JSON 직렬화 가능한 형태로 변환
+                data_dict = {
+                    "type": "numpy",
+                    "shape": motion_data.shape,
+                    "dtype": str(motion_data.dtype),
+                    "data": base64.b64encode(motion_data.tobytes()).decode('utf-8')
+                }
+            # 바이트 데이터인 경우
+            else:
+                data_dict = {
+                    "type": "bytes",
+                    "data": base64.b64encode(motion_data).decode('utf-8')
+                }
+            
+            # Redis에 저장 (1시간 유효)
+            redis_client.setex(
+                data_key,
+                3600,  # 1시간 TTL
+                json.dumps(data_dict)
+            )
+            
+            logger.info(f"모션 데이터 Redis 저장 완료: {data_key}")
+            return data_key
+            
+        except Exception as e:
+            logger.error(f"모션 데이터 Redis 저장 실패: {str(e)}")
+            raise MotionGenerationError(
+                message="모션 데이터 저장 중 오류 발생",
+                error_code="SAVE_ERROR",
+                details={"error": str(e)}
+            )
+    
+    def load_motion_data(self, data_key: str) -> Union[np.ndarray, bytes]:
+        """Redis에서 모션 데이터를 로드"""
+        try:
+            data_json = redis_client.get(data_key)
+            if not data_json:
+                raise MotionGenerationError(
+                    message="모션 데이터를 찾을 수 없습니다",
+                    error_code="DATA_NOT_FOUND"
+                )
+            
+            data_dict = json.loads(data_json)
+            
+            if data_dict["type"] == "numpy":
+                # NumPy 배열로 복원
+                data_bytes = base64.b64decode(data_dict["data"])
+                return np.frombuffer(data_bytes, dtype=np.dtype(data_dict["dtype"])).reshape(data_dict["shape"])
+            else:
+                # 바이트 데이터로 복원
+                return base64.b64decode(data_dict["data"])
+                
+        except Exception as e:
+            logger.error(f"모션 데이터 로드 실패: {str(e)}")
+            raise MotionGenerationError(
+                message="모션 데이터 로드 중 오류 발생",
+                error_code="LOAD_ERROR",
+                details={"error": str(e)}
+            )
+    
     def generate(self, prompt: str) -> Dict[str, Any]:
         """
         텍스트 프롬프트로부터 모션을 생성
@@ -110,48 +195,69 @@ class MotionGenerator:
             logger.info(f"모션 생성 시작 - 프롬프트: {prompt}")
             self.status = MotionStatus.PROCESSING
             
-            # 실제 모델 호출을 시뮬레이션
-            start_time = time.time()
-            time.sleep(2)  # 모델 처리 시간 시뮬레이션
+            # AI 모델 서버에 요청
+            response = requests.post(
+                f"{AI_MODEL_SERVER_URL}/generate",
+                json={
+                    "prompt": prompt,
+                    "model_path": os.getenv("MODEL_PATH", "./save/humanml_trans_enc_512/model000200000.pt"),
+                    "output_dir": os.getenv("OUTPUT_DIR", "./")
+                },
+                timeout=30  # 30초 타임아웃
+            )
             
-            # 테스트용 모션 데이터 생성
-            num_frames = 60  # 2초 분량 (30fps)
-            num_joints = 24  # SMPL 모델 관절 수
-            test_motion = np.random.rand(num_frames, num_joints, 3)  # 임의의 모션 데이터
+            if response.status_code != 200:
+                raise MotionGenerationError(
+                    message=f"AI 모델 서버 오류: {response.status_code}",
+                    error_code="MODEL_SERVER_ERROR",
+                    details={"status_code": response.status_code, "response": response.text}
+                )
             
-            generation_time = time.time() - start_time
+            result = response.json()
+            
+            if result.get("status") != "success":
+                raise MotionGenerationError(
+                    message=result.get("error", "알 수 없는 오류"),
+                    error_code=result.get("error_code", "GENERATION_FAILED"),
+                    details=result.get("details")
+                )
+            
+            # 모션 데이터 Redis에 저장
+            motion_data = result["motion_data"]
+            data_key = self.save_motion_data(motion_data, prompt)
             
             # 메타데이터 생성
             metadata = MotionMetadata(
                 prompt=prompt,
                 model_version=self.model_version,
-                generation_time=generation_time,
-                frame_count=num_frames,
-                additional_info={"joints_count": num_joints}
+                generation_time=result.get("generation_time", 0),
+                frame_count=result.get("frame_count", 60),
+                fps=result.get("fps", 30.0),
+                data_key=data_key,
+                additional_info=result.get("metadata", {})
             )
             
-            # 모션 데이터 생성 및 변환
-            motion_data = MotionData(test_motion, metadata)
             self.status = MotionStatus.COMPLETED
             
             return {
                 'status': 'success',
-                'motion_data': motion_data.to_smpl(),
+                'motion_data': motion_data,
                 'metadata': metadata.to_dict()
             }
             
+        except requests.exceptions.RequestException as e:
+            self.status = MotionStatus.FAILED
+            raise MotionGenerationError(
+                message=f"AI 모델 서버 연결 실패: {str(e)}",
+                error_code="CONNECTION_ERROR",
+                details={"error": str(e)}
+            )
         except Exception as e:
             self.status = MotionStatus.FAILED
-            error_details = {
-                'error_code': getattr(e, 'error_code', 'GENERATION_FAILED'),
-                'message': str(e),
-                'prompt': prompt
-            }
-            logger.error(f"모션 생성 실패: {error_details}")
             raise MotionGenerationError(
                 message=str(e),
-                error_code=error_details['error_code'],
-                details=error_details
+                error_code=getattr(e, 'error_code', 'GENERATION_FAILED'),
+                details=getattr(e, 'details', {})
             )
 
 # 기존 함수를 새로운 클래스 기반으로 구현
