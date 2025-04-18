@@ -133,19 +133,3 @@ def generate_text_async(self, prompt: str, model: str = "gemini-1.5-pro",
                 "total_duration": time.time() - start_time
             }
         }
-
-@app.task
-def process_batch_prompts(prompts: list, model: str = "gemini-1.5-pro",
-                         service: str = "google") -> Dict[str, Any]:
-    """
-    여러 프롬프트를 배치로 처리
-    """
-    results = []
-    for prompt in prompts:
-        task = generate_text_async.delay(prompt, model, False, service)
-        results.append({"prompt": prompt, "task_id": task.id})
-    
-    return {
-        "status": "processing",
-        "tasks": results
-    }

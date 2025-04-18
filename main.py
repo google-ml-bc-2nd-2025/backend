@@ -5,12 +5,12 @@ FastAPI 메인 애플리케이션
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional
 import os
 from dotenv import load_dotenv
 import logging
 from generate import generate_with_retry, refine_prompt
-from tasks import generate_text_async, process_batch_prompts
+from tasks import generate_text_async
 
 # 환경 변수 로드
 load_dotenv()
@@ -35,17 +35,12 @@ app.add_middleware(
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
+    
 # 요청 모델
 class PromptRequest(BaseModel):
     prompt: str
     model: Optional[str] = DEFAULT_MODEL
     stream: Optional[bool] = False
-    service: Optional[str] = DEFAULT_SERVICE
-
-class BatchPromptRequest(BaseModel):
-    prompts: List[str]
-    model: Optional[str] = DEFAULT_MODEL
     service: Optional[str] = DEFAULT_SERVICE
 
 # 단일 생성 API (비동기)
@@ -108,32 +103,6 @@ async def get_task_status(task_id: str):
         }
     except Exception as e:
         logger.error(f"[Celery] 상태 확인 실패: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
-
-# 배치 처리 API
-@app.post("/api/generate/batch")
-async def generate_batch(request: BatchPromptRequest):
-    """
-    여러 프롬프트를 배치로 처리
-    """
-    try:
-        logger.info(f"[POST /api/generate/batch] 배치 요청 수신: {len(request.prompts)} 개")
-        
-        # Celery 배치 작업 시작
-        task = process_batch_prompts.delay(
-            prompts=request.prompts,
-            model=request.model,
-            service=request.service
-        )
-        
-        return {
-            "task_id": task.id,
-            "status": "processing",
-            "total_prompts": len(request.prompts)
-        }
-
-    except Exception as e:
-        logger.error(f"[Celery] 배치 처리 실패: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 # 프롬프트 엔드포인트 추가
