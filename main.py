@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 import logging
 from generate import generate_with_retry, refine_prompt
 from tasks import generate_text_async
+from agent.think import check_prompt
 
 # 환경 변수 로드
 load_dotenv()
@@ -115,6 +116,18 @@ async def process_prompt(request: Request):
     logger.info(f"[POST /api/prompt] 프롬프트 수신: {prompt}")
     
     try:
+        # 프롬프트 검사
+        prompt_state = check_prompt(prompt)
+        if not prompt_state.is_valid:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "status": "error",
+                    "prompt": prompt,
+                    "message": prompt_state.error_message
+                }
+            )
+        
         # Celery 작업 시작
         task = generate_text_async.delay(
             prompt=prompt,
@@ -131,12 +144,17 @@ async def process_prompt(request: Request):
             "check_status_url": f"/api/tasks/{task.id}"
         }
                 
+    except HTTPException as he:
+        raise he
     except Exception as e:
         logger.error(f"프롬프트 처리 중 오류 발생: {str(e)}")
-        return {
-            "status": "error",
-            "message": str(e)
-        }
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "status": "error",
+                "message": str(e)
+            }
+        )
 
 if __name__ == "__main__":
     import uvicorn

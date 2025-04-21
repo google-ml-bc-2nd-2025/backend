@@ -11,3 +11,10 @@ class AgentState(TypedDict):
     resource_details: Dict[str, str]
     work_results: Optional[str]
     next: str
+
+class PromptState:
+    """프롬프트 검사 상태 관리"""
+    def __init__(self):
+        self.prompt = None
+        self.is_valid = False
+        self.error_message = None

@@ -3,13 +3,17 @@ Celery 작업 정의 모듈
 """
 
 from celery import Task
-from celery_app import app
+from celery_app import app  
 import time
 from datetime import datetime, timezone
 import logging
 from typing import Optional, Dict, Any
 from generate import generate_with_retry
 from mdm import generate_animation
+from agent.think import check_prompt
+from generate import refine_prompt
+from agent.state import PromptState
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +81,17 @@ def generate_text_async(self, prompt: str, model: str = "gemini-1.5-pro",
         # 작업 시작 시간 기록
         self.update_task_timing(task_id, "started_at")
         
+        # 프롬프트 검사
+        prompt_state = check_prompt(prompt)
+        if not prompt_state.is_valid:
+            return {
+                "status": "failed",
+                "error": {
+                    "code": "INVALID_PROMPT",
+                    "message": prompt_state.error_message
+                }
+            }
+        
         # 텍스트 정제 시작
         self.current_step = ProcessingStep.TEXT_REFINEMENT
         text_refinement_start = time.time()
@@ -95,14 +110,21 @@ def generate_text_async(self, prompt: str, model: str = "gemini-1.5-pro",
         motion_generation_start = time.time()
         logger.info(f"Starting motion generation for task {task_id}")
         
-        # MDM 모델 호출
-        motion_result = generate_animation(refined_text)
+        # MDM 모델 호출 (동기적으로 변환)
+        import asyncio
+        motion_result = asyncio.run(generate_animation(refined_text))
         if motion_result['status'] != 'success':
             raise Exception(f"모션 생성 실패: {motion_result.get('error')}")
         
         motion_data = motion_result['motion_data']
         motion_metadata = motion_result.get('metadata', {})
         motion_generation_duration = time.time() - motion_generation_start
+        
+        # Redis에 모션 데이터 저장
+        from mdm import MotionGenerator
+        generator = MotionGenerator()
+        motion_data_bytes = json.dumps(motion_data).encode()
+        data_key = generator.save_motion_data(motion_data_bytes, refined_text)
         
         return {
             "status": "completed",
@@ -132,4 +154,43 @@ def generate_text_async(self, prompt: str, model: str = "gemini-1.5-pro",
             "timing": {
                 "total_duration": time.time() - start_time
             }
+        }
+
+@app.task
+def process_prompt(prompt: str) -> dict:
+    """
+    프롬프트를 처리하는 메인 태스크입니다.
+    
+    Args:
+        prompt (str): 사용자 입력 프롬프트
+        
+    Returns:
+        dict: 처리 결과
+    """
+    # 1. 프롬프트 검사
+    prompt_state = check_prompt(prompt)
+    
+    if not prompt_state.is_valid:
+        return {
+            'status': 'error',
+            'message': prompt_state.error_message
+        }
+    
+    # 2. 프롬프트 개선
+    try:
+        result = refine_prompt(prompt)
+        if result['status'] == 'success':
+            return {
+                'status': 'success',
+                'refined_prompt': result['refined_text']
+            }
+        else:
+            return {
+                'status': 'error',
+                'message': result.get('error', '프롬프트 처리 중 오류 발생')
+            }
+    except Exception as e:
+        return {
+            'status': 'error',
+            'message': f'프롬프트 처리 중 오류 발생: {str(e)}'
         }
