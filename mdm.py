@@ -35,7 +35,7 @@ redis_client = redis.Redis(
 )
 
 # MDM 서버 설정
-MDM_SERVER_URL = os.getenv("MDM_SERVER_URL", "http://79.116.20.87:27777")
+MDM_SERVER_URL = os.getenv("MDM_SERVER_URL", "http://82.141.118.2:2001")
 TIMEOUT = 60.0  # 요청 타임아웃 (초)
 
 class MotionGenerationError(Exception):
@@ -174,100 +174,6 @@ class MotionGenerator:
                 message="모션 데이터 로드 중 오류 발생",
                 error_code="LOAD_ERROR",
                 details={"error": str(e)}
-            )
-    
-    def generate(self, prompt: str) -> Dict[str, Any]:
-        """
-        텍스트 프롬프트로부터 모션을 생성
-        
-        Args:
-            prompt (str): 정제된 영어 프롬프트
-            
-        Returns:
-            Dict[str, Any]: {
-                'status': str,
-                'motion_data': bytes,  # SMPL 형식의 데이터
-                'metadata': Dict[str, Any],
-                'error': Optional[Dict[str, Any]]
-            }
-            
-        Raises:
-            MotionGenerationError: 모션 생성 중 오류 발생 시
-        """
-        try:
-            # 입력 검증
-            if not prompt or not prompt.strip():
-                raise MotionGenerationError(
-                    message="프롬프트가 비어있습니다",
-                    error_code="EMPTY_PROMPT"
-                )
-
-            logger.info(f"모션 생성 시작 - 프롬프트: {prompt}")
-            self.status = MotionStatus.PROCESSING
-            
-            # AI 모델 서버에 요청
-            response = requests.post(
-                f"{AI_MODEL_SERVER_URL}/generate",
-                json={
-                    "prompt": prompt,
-                    "output_format": "json_file",
-                    "num_repetitions": 1
-                },
-                timeout=60  # 60초 타임아웃
-            )
-            
-            if response.status_code != 200:
-                raise MotionGenerationError(
-                    message=f"AI 모델 서버 오류: {response.status_code}",
-                    error_code="MODEL_SERVER_ERROR",
-                    details={"status_code": response.status_code, "response": response.text}
-                )
-            
-            result = response.json()
-            
-            if result.get("status") != "success":
-                raise MotionGenerationError(
-                    message=result.get("error", "알 수 없는 오류"),
-                    error_code=result.get("error_code", "GENERATION_FAILED"),
-                    details=result.get("details")
-                )
-            
-            # 모션 데이터 Redis에 저장
-            motion_data = json.dumps(result["animation_result"]).encode()  # JSON을 바이트로 변환
-            data_key = self.save_motion_data(motion_data, prompt)
-            
-            # 메타데이터 생성 (프롬프트 제외)
-            metadata = MotionMetadata(
-                prompt="",  # 프롬프트 저장하지 않음
-                model_version=self.model_version,
-                generation_time=result.get("generation_time", 0),
-                frame_count=result.get("frame_count", 60),
-                fps=result.get("fps", 30.0),
-                data_key=data_key,
-                additional_info=result.get("metadata", {})
-            )
-            
-            self.status = MotionStatus.COMPLETED
-            
-            return {
-                'status': 'success',
-                'motion_data': motion_data,
-                'metadata': metadata.to_dict()
-            }
-            
-        except requests.exceptions.RequestException as e:
-            self.status = MotionStatus.FAILED
-            raise MotionGenerationError(
-                message=f"AI 모델 서버 연결 실패: {str(e)}",
-                error_code="CONNECTION_ERROR",
-                details={"error": str(e)}
-            )
-        except Exception as e:
-            self.status = MotionStatus.FAILED
-            raise MotionGenerationError(
-                message=str(e),
-                error_code=getattr(e, 'error_code', 'GENERATION_FAILED'),
-                details=getattr(e, 'details', {})
             )
 
 async def generate_animation(prompt: str) -> Dict[str, Any]:
