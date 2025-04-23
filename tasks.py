@@ -42,34 +42,36 @@ class AnimationTask(Task):
     def on_success(self, retval, task_id, args, kwargs):
         """작업 성공 시 호출"""
         logger.info(f"Task {task_id} completed successfully")
-        self.update_task_timing(task_id, "completed_at")
+        self.update_task_timing(task_id, "completed_at", status="SUCCESS")
         
     def on_failure(self, exc, task_id, args, kwargs, einfo):
         """작업 실패 시 호출"""
         logger.error(f"Task {task_id} failed: {exc}")
-        self.update_task_timing(task_id, "completed_at")
+        self.update_task_timing(task_id, "completed_at", status="FAILED")
         
-    def update_task_timing(self, task_id: str, timing_key: str):
-        """작업 타이밍 정보 업데이트"""
+    def update_task_timing(self, task_id: str, timing_key: str, status: str = "PENDING"):
+        """작업 타이밍 정보 업데이트
+        
+        Args:
+            task_id: 작업 ID
+            timing_key: 타이밍 정보 키
+            status: 작업 상태 (기본값: "PENDING")
+        """
         app.backend.store_result(
             task_id,
             {
                 timing_key: datetime.now(timezone.utc).isoformat()
             },
-            "SUCCESS"
+            status
         )
 
 @app.task(bind=True, base=AnimationTask)
-def generate_text_async(self, prompt: str, model: str = "gemini-1.5-pro", 
-                       stream: bool = False, service: str = "google") -> Dict[str, Any]:
+def generate_text_async(self, prompt: str) -> Dict[str, Any]:
     """
     비동기 텍스트 생성 작업
     
     Args:
         prompt: 사용자 입력 프롬프트
-        model: 사용할 모델 이름
-        stream: 스트리밍 여부
-        service: 사용할 서비스
         
     Returns:
         작업 결과 딕셔너리
@@ -79,7 +81,7 @@ def generate_text_async(self, prompt: str, model: str = "gemini-1.5-pro",
     
     try:
         # 작업 시작 시간 기록
-        self.update_task_timing(task_id, "started_at")
+        self.update_task_timing(task_id, "started_at", status="PROCESSING")
         
         # 프롬프트 검사
         prompt_state = check_prompt(prompt)
@@ -109,28 +111,40 @@ def generate_text_async(self, prompt: str, model: str = "gemini-1.5-pro",
         self.current_step = ProcessingStep.MOTION_GENERATION
         motion_generation_start = time.time()
         logger.info(f"Starting motion generation for task {task_id}")
+        print(f"[DEBUG] 모션 생성 시작: task_id={task_id}")
         
         # MDM 모델 호출 (동기적으로 변환)
         import asyncio
+        print(f"[DEBUG] MDM 모델 호출 전: refined_text={refined_text}")
         motion_result = asyncio.run(generate_animation(refined_text))
+        print(f"[DEBUG] MDM 모델 호출 결과: {motion_result}")
+        
         if motion_result['status'] != 'success':
+            print(f"[DEBUG] 모션 생성 실패: {motion_result.get('error')}")
             raise Exception(f"모션 생성 실패: {motion_result.get('error')}")
         
-        motion_data = motion_result['motion_data']
+        motion_array = motion_result['motion_data']
         motion_metadata = motion_result.get('metadata', {})
         motion_generation_duration = time.time() - motion_generation_start
+        print(f"[DEBUG] 모션 데이터: shape={motion_array.shape}, dtype={motion_array.dtype}")
+        print(f"[DEBUG] 모션 메타데이터: {motion_metadata}")
         
         # Redis에 모션 데이터 저장
         from mdm import MotionGenerator
         generator = MotionGenerator()
-        motion_data_bytes = json.dumps(motion_data).encode()
-        data_key = generator.save_motion_data(motion_data_bytes, refined_text)
+        print(f"[DEBUG] Redis 저장 전 데이터: shape={motion_array.shape}")
+        data_key = generator.save_motion_data(motion_array, task_id)
+        print(f"[DEBUG] Redis 저장 완료: data_key={data_key}")
         
         return {
             "status": "completed",
             "text_result": refined_text,
             "animation_result": {
-                "smpl_data": motion_data,
+                "smpl_data": {
+                    "pose": motion_array.tolist(),
+                    "betas": [],
+                    "trans": []
+                },
                 "metadata": motion_metadata,
                 "timing": {
                     "text_refinement_duration": text_refinement_duration,
@@ -142,12 +156,14 @@ def generate_text_async(self, prompt: str, model: str = "gemini-1.5-pro",
             
     except Exception as e:
         logger.error(f"Task {task_id} failed: {str(e)}")
+        error_code = ErrorCodes.TEXT_REFINEMENT_FAILED if self.current_step == ProcessingStep.TEXT_REFINEMENT else ErrorCodes.MOTION_GENERATION_FAILED
+        error_message = str(e)
+        
         return {
             "status": "failed",
             "error": {
-                "code": ErrorCodes.TEXT_REFINEMENT_FAILED if self.current_step == ProcessingStep.TEXT_REFINEMENT
-                       else ErrorCodes.MOTION_GENERATION_FAILED,
-                "message": "작업 처리 중 오류가 발생했습니다.",
+                "code": error_code,
+                "message": error_message,
                 "details": str(e),
                 "step": self.current_step
             },

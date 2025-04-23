@@ -35,7 +35,7 @@ set -e
 # START API Server
 if [ -f "main.py" ]; then
     echo "API Server is starting..."
-    python3 main.py
+    uvicorn main:app --host 0.0.0.0 --port 8000
 else
     echo "Error: main.py not found!"
     exit 1
