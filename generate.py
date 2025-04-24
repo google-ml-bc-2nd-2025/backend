@@ -54,9 +54,24 @@ def refine_prompt(prompt: str) -> Dict[str, Any]:
         3. 동작의 시작과 끝을 명확하게 정의
         4. 불필요한 수식어나 모호한 표현 제거
 
+        예시:
+        입력 텍스트: 활기차게 걷기
+        변환된 텍스트: Walks energetically with arms swinging and chest lifted
+
+        입력 텍스트: 슬프게 고개를 숙임
+        변환된 텍스트: Slowly lowers head while shoulders droop to express sadness
+
+        입력 텍스트: 화난 듯이 빠르게 달려듦
+        변환된 텍스트: Charges forward rapidly with clenched fists and stiff posture
+
+        입력 텍스트: 부끄럽게 손을 흔듦
+        변환된 텍스트: Waves hand gently while looking down and shifting body weight shyly
+
+        입력 텍스트: 기쁘게 점프하며 팔을 듦
+        변환된 텍스트: Jumps upward with both arms raised high, expressing joy
+
         출력 형식:
-        - 한 문장으로 된 명확한 동작 설명
-        - 영어로 변환
+        - 한 문장으로 된 명확한 동작 설명 (영어로만)
         """
         
         # 프롬프트 전송
@@ -67,9 +82,13 @@ def refine_prompt(prompt: str) -> Dict[str, Any]:
         
         # 응답 처리
         if response.text:
+            # 영문만 추출
+            refined_text = response.text.strip()
+            # 한글 제거
+            refined_text = ''.join([c for c in refined_text if not ('\u4e00' <= c <= '\u9fff' or '\u3130' <= c <= '\u318F' or '\uAC00' <= c <= '\uD7AF')])
             return {
                 'status': 'success',
-                'refined_text': response.text.strip()
+                'refined_text': refined_text.strip()
             }
         else:
             raise ValueError("API 응답이 비어있습니다.")
