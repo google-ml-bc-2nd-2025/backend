@@ -32,6 +32,16 @@ set -e
 #     echo "Model '$MODEL' already exists."
 # fi
 
+# echo "Starting Celery worker..."
+# celery -A celery_app worker --loglevel=info &
+# CELERY_PID=$!
+
+# # Wait for Celery to initialize
+# echo "Waiting for Celery worker to initialize..."
+# sleep 5
+# echo "Celery worker started with PID: $CELERY_PID"
+
+
 # START API Server
 if [ -f "main.py" ]; then
     echo "API Server is starting..."
@@ -40,3 +50,4 @@ else
     echo "Error: main.py not found!"
     exit 1
 fi
+
