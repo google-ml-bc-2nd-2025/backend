@@ -32,7 +32,7 @@ redis_client = redis.Redis(
 )
 
 # MDM 서버 설정
-MDM_SERVER_URL = os.getenv("MDM_SERVER_URL", "http://82.141.118.2:2294")  # 마지막 슬래시 제거
+MDM_SERVER_URL = os.getenv("MDM_SERVER_URL", "http://82.141.118.2:2249")  # 마지막 슬래시 제거
 TIMEOUT = 60.0  # 요청 타임아웃 (초)
 
 class MotionGenerationError(Exception):
@@ -164,7 +164,7 @@ async def generate_animation(prompt: str) -> dict:
         # 모션 생성 요청
         print(f"[DEBUG] 모션 생성 요청: prompt={prompt}")
         response = requests.post(
-            'http://82.141.118.2:2294/predict',
+            'http://82.141.118.2:2249/predict',
             json={
                 'prompt': prompt,
                 'num_repetitions': 1,
