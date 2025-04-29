@@ -9,10 +9,8 @@ ENV GOOGLE_API_KEY=${GOOGLE_API_KEY}
 ENV GOOGLE_MODEL=gemini-1.5-pro
 ENV DEFAULT_SERVICE=google
 
-# Redis 환경 변수 설정
-ENV REDIS_HOST=redis
-ENV REDIS_PORT=6379
-ENV REDIS_DB=0
+# MDM 서버 환경 변수 설정
+ENV MDM_SERVER_URL=http://47.186.55.156:57179
 
 # 작업 디렉토리 설정
 WORKDIR /app
